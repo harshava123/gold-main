@@ -609,7 +609,7 @@ function EmployeeReports() {
                     <th className="px-4 py-2 border">Touch</th>
                     <th className="px-4 py-2 border">Less</th>
                     <th className="px-4 py-2 border">Fine</th>
-                    <th className="px-4 py-2 border">Amount</th>
+                    <th className="px-4 py-2 border">Amount (₹, silver only)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -627,7 +627,7 @@ function EmployeeReports() {
                         <td className="px-4 py-2 border">{ex.touch}</td>
                         <td className="px-4 py-2 border">{ex.less}</td>
                         <td className="px-4 py-2 border">{ex.fine}</td>
-                        <td className="px-4 py-2 border font-bold">{ex.amount}</td>
+                        <td className="px-4 py-2 border font-bold">{ex.type === 'SILVER' ? ex.amount : '-'}</td>
                       </tr>
                     ))
                   )}
