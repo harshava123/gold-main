@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Employeeheader from './Employeeheader';
 import { db } from '../../../firebase';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
@@ -38,6 +39,7 @@ function EmployeeReports() {
   };
 
   const { selectedStore } = useStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (toast.show) {
@@ -53,6 +55,11 @@ function EmployeeReports() {
     return { from, to };
   }, [selectedDate]);
 
+  // Redirect if no store is selected
+  useEffect(() => {
+    if (!selectedStore) navigate('/employee');
+  }, [selectedStore, navigate]);
+
   // Fetch transactional data (similar to admin reports)
   useEffect(() => {
     const fetchData = async () => {
@@ -61,12 +68,12 @@ function EmployeeReports() {
       try {
         const fetchWithFallback = async (collectionName) => {
           try {
-            const q = query(
+            const qRef = query(
               collection(db, collectionName),
               where('storeId', '==', selectedStore.id),
               orderBy('createdAt', 'desc')
             );
-            const snap = await getDocs(q);
+            const snap = await getDocs(qRef);
             return snap.docs.map(doc => doc.data());
           } catch (error) {
             if (error.message && error.message.includes('index')) {
