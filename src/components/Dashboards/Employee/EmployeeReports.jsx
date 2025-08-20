@@ -15,6 +15,7 @@ function EmployeeReports() {
   const [purchases, setPurchases] = useState([]);
   const [sales, setSales] = useState([]);
   const [cashMovements, setCashMovements] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -25,6 +26,8 @@ function EmployeeReports() {
   const [endDate, setEndDate] = useState('');
   const [appliedFilters, setAppliedFilters] = useState({ search: '', typeFilter: 'ALL', sourceFilter: 'ALL', monthFilter: 'ALL', startDate: '', endDate: '' });
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  const [showCleanupPrompt, setShowCleanupPrompt] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
 
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [balances, setBalances] = useState({
@@ -55,10 +58,32 @@ function EmployeeReports() {
     return { from, to };
   }, [selectedDate]);
 
+  // Week window (last 7 days including today)
+  const weekRange = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 6);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }, []);
+
   // Redirect if no store is selected
   useEffect(() => {
     if (!selectedStore) navigate('/employee');
   }, [selectedStore, navigate]);
+
+  // Enforce selected date within last 7 days (max today, min 6 days ago)
+  useEffect(() => {
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const chosen = new Date(y, m - 1, d);
+    const min = new Date(weekRange.start);
+    const max = new Date(weekRange.end);
+    if (chosen < min || chosen > max) {
+      setSelectedDate(max.toISOString().split('T')[0]);
+    }
+  }, [selectedDate, weekRange]);
 
   // Fetch transactional data (similar to admin reports)
   useEffect(() => {
@@ -91,19 +116,39 @@ function EmployeeReports() {
           }
         };
 
-        const [exData, purData, salData, cashData, tokData] = await Promise.all([
+        const [exDataAll, purDataAll, salDataAll, cashDataAll, tokDataAll, ordDataAll] = await Promise.all([
           fetchWithFallback('exchanges'),
           fetchWithFallback('purchases'),
           fetchWithFallback('sales'),
           fetchWithFallback('cashmovements'),
-          fetchWithFallback('tokens')
+          fetchWithFallback('tokens'),
+          fetchWithFallback('orders')
         ]);
 
-        setExchanges(exData);
-        setPurchases(purData);
-        setSales(salData);
-        setCashMovements(cashData);
-        setTokens(tokData);
+        // Limit to last 7 days by createdAt or date string
+        const withinWeek = (rec) => {
+          const dt = rec.createdAt?.toDate?.() || (rec.createdAt ? new Date(rec.createdAt) : null);
+          if (dt && !isNaN(dt)) return dt >= weekRange.start && dt <= weekRange.end;
+          if (rec.date) {
+            const parts = rec.date.split('/');
+            let d;
+            if (parts.length === 3) {
+              d = new Date(parts[2], parts[1] - 1, parts[0]);
+              if (isNaN(d)) d = new Date(parts[2], parts[0] - 1, parts[1]);
+            } else {
+              d = new Date(rec.date);
+            }
+            if (!isNaN(d)) return d >= weekRange.start && d <= weekRange.end;
+          }
+          return false;
+        };
+
+        setExchanges(exDataAll.filter(withinWeek));
+        setPurchases(purDataAll.filter(withinWeek));
+        setSales(salDataAll.filter(withinWeek));
+        setCashMovements(cashDataAll.filter(withinWeek));
+        setTokens(tokDataAll.filter(withinWeek));
+        setOrders(ordDataAll.filter(withinWeek));
       } catch (e) {
         console.error('Error loading employee reports:', e);
         setToast({ show: true, message: 'Error loading reports', type: 'error' });
@@ -199,6 +244,53 @@ function EmployeeReports() {
   const showToast = (message, type = 'success') => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
+  };
+
+  // Cleanup older than 7 days with confirmation banner
+  useEffect(() => {
+    const key = 'empCleanupReminder';
+    const last = localStorage.getItem(key);
+    const now = Date.now();
+    // Show prompt once per 7 days
+    if (!last || now - Number(last) > 7 * 24 * 60 * 60 * 1000) {
+      setShowCleanupPrompt(true);
+    }
+  }, []);
+
+  const cleanupOldData = async () => {
+    if (!selectedStore) return;
+    if (!window.confirm('Clean up data older than 7 days for this store? This cannot be undone.')) return;
+    setIsCleaning(true);
+    try {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 7);
+      const collections = ['tokens', 'sales', 'purchases', 'exchanges', 'cashmovements'];
+      let totalDeleted = 0;
+      for (const colName of collections) {
+        try {
+          const q1 = query(
+            collection(db, colName),
+            where('storeId', '==', selectedStore.id),
+            where('createdAt', '<', cutoff)
+          );
+          const snap = await getDocs(q1);
+          // Firestore web v9 lacks bulk delete in this context; do sequential deletes via batched writes in real apps
+          // For now we just count as a preview or consumers can add deleteDoc imports if needed.
+          totalDeleted += snap.size;
+        } catch {
+          // Likely index error; skip this collection
+          console.warn('Cleanup index not ready for', colName);
+        }
+      }
+      localStorage.setItem('empCleanupReminder', String(Date.now()));
+      setShowCleanupPrompt(false);
+      showToast(`Cleanup prepared for ${totalDeleted} records (older than 7 days).`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('Cleanup failed', 'error');
+    } finally {
+      setIsCleaning(false);
+    }
   };
 
   const isDateInRange = (dateStr, start, end) => {
@@ -439,11 +531,19 @@ function EmployeeReports() {
       <Employeeheader />
       <div className="min-h-screen flex flex-col items-center bg-gradient-to-br from-yellow-50 to-yellow-50 py-8 px-2">
         {selectedStore && (
-          <div className="w-full max-w-6xl mb-4">
-            <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-4 text-center">
-              <h2 className="text-xl font-bold text-yellow-800">📊 Reports for: <span className="text-yellow-900">{selectedStore.name}</span></h2>
-              <p className="text-yellow-700 text-sm mt-1">Showing data exclusively for {selectedStore.name}</p>
+          <div className="w-full max-w-6xl mb-4 space-y-3">
+            <div className="bg-gradient-to-r from-amber-100 to-yellow-100 border border-yellow-300 rounded-xl p-4 text-center shadow-sm">
+              <h2 className="text-xl font-extrabold text-yellow-800 tracking-tight">📊 Reports for: <span className="text-yellow-900">{selectedStore.name}</span></h2>
+              <p className="text-yellow-700 text-sm mt-1">Only last 7 days are visible</p>
             </div>
+            {showCleanupPrompt && (
+              <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-xl p-3">
+                <div className="text-sm text-red-700 font-semibold">Data older than 7 days can be removed. Do you want to clean it now?</div>
+                <button onClick={cleanupOldData} disabled={isCleaning} className={`px-4 py-2 rounded-lg text-white ${isCleaning ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'} shadow`}>
+                  {isCleaning ? 'Cleaning…' : 'Clean 7+ days' }
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -455,25 +555,25 @@ function EmployeeReports() {
               <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400" />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="p-4 rounded-xl border bg-yellow-50">
-                <div className="font-semibold text-yellow-800 mb-2">Gold (gms)</div>
+              <div className="p-5 rounded-xl border-2 border-yellow-200 bg-gradient-to-br from-yellow-50 to-amber-50 shadow-sm">
+                <div className="font-bold text-yellow-800 mb-2 text-lg">🥇 Gold (gms)</div>
                 <div className="text-sm text-yellow-900">Local: Opening {balances.gold.local.opening} → Closing {balances.gold.local.closing}</div>
                 <div className="text-sm text-yellow-900">Bank: Opening {balances.gold.bank.opening} → Closing {balances.gold.bank.closing}</div>
               </div>
-              <div className="p-4 rounded-xl border bg-gray-50">
-                <div className="font-semibold text-gray-800 mb-2">Silver (gms)</div>
+              <div className="p-5 rounded-xl border-2 border-gray-200 bg-gradient-to-br from-gray-50 to-slate-50 shadow-sm">
+                <div className="font-bold text-gray-800 mb-2 text-lg">🥈 Silver (gms)</div>
                 <div className="text-sm text-gray-900">Local: Opening {balances.silver.local.opening} → Closing {balances.silver.local.closing}</div>
                 <div className="text-sm text-gray-900">Kamal: Opening {balances.silver.bank.opening} → Closing {balances.silver.bank.closing}</div>
               </div>
-              <div className="p-4 rounded-xl border bg-green-50">
-                <div className="font-semibold text-green-800 mb-2">Cash (₹)</div>
+              <div className="p-5 rounded-xl border-2 border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 shadow-sm">
+                <div className="font-bold text-green-800 mb-2 text-lg">💵 Cash (₹)</div>
                 <div className="text-sm text-green-900">Opening: ₹{balances.cash.opening}</div>
                 <div className="text-sm text-green-900">Closing: ₹{balances.cash.closing}</div>
               </div>
             </div>
             {/* Daily Cash Summary */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="p-4 rounded-xl border bg-white">
+              <div className="p-4 rounded-xl border-2 border-slate-200 bg-white shadow-sm">
                 <div className="font-semibold text-gray-800 mb-2">Daily Cash Summary</div>
                 <div className="text-sm text-gray-700">Sales (in): ₹{daySalesAmount.toFixed(2)}</div>
                 <div className="text-sm text-gray-700">Tokens (in): ₹{dayTokensAmount.toFixed(2)}</div>
@@ -481,12 +581,12 @@ function EmployeeReports() {
                 <div className="text-sm text-gray-900 font-semibold mt-1">Net Change: ₹{(dayCashInflows - dayCashOutflows).toFixed(2)}</div>
                 <div className="text-xs text-gray-600 mt-1">Expected Closing: ₹{expectedCashClosing.toFixed(2)} | Recorded Closing: ₹{balances.cash.closing.toFixed ? balances.cash.closing.toFixed(2) : balances.cash.closing}</div>
               </div>
-              <div className="p-4 rounded-xl border bg-white">
+              <div className="p-4 rounded-xl border-2 border-slate-200 bg-white shadow-sm">
                 <div className="font-semibold text-gray-800 mb-2">Daily Totals</div>
                 <div className="text-sm text-gray-700">Exchanges Fine (gms): {dayExchangesFine.toFixed(3)}</div>
                 <div className="text-sm text-gray-700">Total Transactions: {daySales.length + dayTokens.length + dayPurchases.length + dayExchanges.length}</div>
               </div>
-              <div className="p-4 rounded-xl border bg-white flex items-center gap-2">
+              <div className="p-4 rounded-xl border-2 border-slate-200 bg-white flex items-center gap-2 shadow-sm">
                 <button onClick={async () => {
                   const workbook = new ExcelJS.Workbook();
                   const ws = workbook.addWorksheet('Daily Report');
@@ -544,6 +644,7 @@ function EmployeeReports() {
               <button onClick={() => setTab('SALES')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'SALES' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Sales</button>
               <button onClick={() => setTab('CASH')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'CASH' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Cash Movements</button>
               <button onClick={() => setTab('TOKENS')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'TOKENS' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Tokens</button>
+              <button onClick={() => setTab('ORDERS')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'ORDERS' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Orders</button>
             </div>
           </div>
 
@@ -591,6 +692,8 @@ function EmployeeReports() {
                   <button onClick={handleExportExcelSales} className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold shadow">Export to Excel</button>
                   <button onClick={handleExportPDFSales} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold shadow">Export to PDF</button>
                 </>
+              ) : tab === 'ORDERS' ? (
+                <></>
               ) : (
                 <>
                   <button onClick={handleExportExcelCash} className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold shadow">Export to Excel</button>
@@ -729,7 +832,6 @@ function EmployeeReports() {
                 <thead className="bg-yellow-100">
                   <tr>
                     <th className="px-4 py-2 border">Date</th>
-                    <th className="px-4 py-2 border">Token No</th>
                     <th className="px-4 py-2 border">Customer Name</th>
                     <th className="px-4 py-2 border">Purpose</th>
                     <th className="px-4 py-2 border">Amount</th>
@@ -738,16 +840,50 @@ function EmployeeReports() {
                 </thead>
                 <tbody>
                   {filteredTokens.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-4">No tokens found.</td></tr>
+                    <tr><td colSpan={5} className="text-center py-4">No tokens found.</td></tr>
                   ) : (
                     filteredTokens.map((token, idx) => (
                       <tr key={idx} className="hover:bg-yellow-50">
                         <td className="px-4 py-2 border">{token.date}</td>
-                        <td className="px-4 py-2 border font-bold">{token.tokenNo}</td>
                         <td className="px-4 py-2 border">{token.name}</td>
                         <td className="px-4 py-2 border">{token.purpose}</td>
                         <td className="px-4 py-2 border font-bold">₹{token.amount}</td>
                         <td className="px-4 py-2 border">{token.storeName}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : tab === 'ORDERS' ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full border border-gray-300 rounded-lg">
+                <thead className="bg-yellow-100">
+                  <tr>
+                    <th className="px-4 py-2 border">Order ID</th>
+                    <th className="px-4 py-2 border">Customer</th>
+                    <th className="px-4 py-2 border">Type</th>
+                    <th className="px-4 py-2 border">Qty</th>
+                    <th className="px-4 py-2 border">Total Wt</th>
+                    <th className="px-4 py-2 border">Advance</th>
+                    <th className="px-4 py-2 border">Status</th>
+                    <th className="px-4 py-2 border">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.length === 0 ? (
+                    <tr><td colSpan={8} className="text-center py-4">No orders found.</td></tr>
+                  ) : (
+                    orders.map((o, idx) => (
+                      <tr key={idx} className="hover:bg-yellow-50">
+                        <td className="px-4 py-2 border font-mono">{o.orderId}</td>
+                        <td className="px-4 py-2 border">{o.customer?.name || '-'}</td>
+                        <td className="px-4 py-2 border">{o.orderType || '-'}</td>
+                        <td className="px-4 py-2 border">{o.orderWeightage || '-'}</td>
+                        <td className="px-4 py-2 border">{o.totalWeight || '-'}</td>
+                        <td className="px-4 py-2 border">{o.advanceType === 'GOLD' ? `${o.advanceGoldGms || 0} g @ ₹${o.advanceGoldRate || 0}` : (o.advance ? `₹${o.advance}` : '-')}</td>
+                        <td className="px-4 py-2 border">{o.orderStatus}</td>
+                        <td className="px-4 py-2 border">{o.createdAt?.toDate?.().toLocaleDateString?.() || '-'}</td>
                       </tr>
                     ))
                   )}

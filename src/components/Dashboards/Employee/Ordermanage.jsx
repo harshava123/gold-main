@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import Employeeheader from './Employeeheader';
 import { FaPlus, FaTrash, FaWhatsapp, FaTimes, FaEdit, FaSave, FaEye } from 'react-icons/fa';
+import { db } from '../../../firebase';
+import { doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { useStore } from '../Admin/StoreContext';
  
 const ORNAMENT_TYPES = [
   'Necklace',
@@ -39,15 +42,21 @@ function getNextOrderId(orders) {
 }
  
 function Ordermanage() {
+  const { selectedStore } = useStore();
   const [orders, setOrders] = useState([
     {
       orderId: 'ORD-00001',
+      orderType: '', // 'GROUP' | 'INDIVIDUAL'
       customer: { name: '', contact: '', address: '' },
       subQuantity: '',
       totalWeight: '',
-      advance: '',
+      advance: '', // amount in ₹ (if advanceType === 'AMOUNT')
+      advanceType: 'AMOUNT', // 'AMOUNT' | 'GOLD'
+      advanceGoldGms: '', // if advanceType === 'GOLD'
+      advanceGoldRate: '', // if advanceType === 'GOLD'
+      advanceAmountRate: '', // if advanceType === 'AMOUNT'
       requestedDeliveryDate: '',
-      orderWeightage: '',
+      orderWeightage: '', // number of items
       orderPeopleContact: '', // Contact number for order people
       items: [
         { 
@@ -67,6 +76,16 @@ function Ordermanage() {
       isPlaced: false,
       reminderActive: false, // Track if reminder is active
       reminderCount: 0, // Count of reminders sent
+      dailyChecklist: {
+        day1: { status: 'NA', note: '' }, // FORWARDED | NOT_FORWARDED | NA
+        day2: { status: 'NA', note: '' }, // PLACED | NOT_PLACED | NA
+        day3: { status: 'NA', note: '' }, // INITIATED | NOT_INITIATED | NA
+        day4: { deptVerified: false, workerVerified: false, note: '' },
+        day5: { status: 'NA', note: '' }, // IN_PROGRESS | DELAY | COMPLETED | NA
+        day6: { status: 'NA', note: '' },
+        day7: { location: 'NA', note: '' }, // WORKER | DEPARTMENT | DELIVERED | NA
+        day8: { location: 'NA', note: '' }
+      }
     },
   ]);
 
@@ -91,10 +110,33 @@ function Ordermanage() {
     if (activeTab >= filteredOrders.length) setActiveTab(0);
   }, [filteredOrders.length]);
  
+  // Persist an order to Firestore (upsert)
+  const saveOrderToDb = async (order) => {
+    try {
+      if (!order?.orderId || !selectedStore) return;
+      const ref = doc(db, 'orders', order.orderId);
+      const payload = {
+        ...order,
+        storeId: selectedStore.id,
+        storeName: selectedStore.name,
+        updatedAt: serverTimestamp(),
+      };
+      if (!order.createdAt) payload.createdAt = serverTimestamp();
+      await setDoc(ref, payload, { merge: true });
+    } catch (e) {
+      console.error('Failed to save order', e);
+    }
+  };
+
   // Update order by index in filteredOrders
   const updateOrder = (filteredIdx, newOrder) => {
     const orderId = filteredOrders[filteredIdx]?.orderId;
-    setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, ...newOrder } : o)));
+    setOrders((prev) => {
+      const mergedList = prev.map((o) => (o.orderId === orderId ? { ...o, ...newOrder } : o));
+      const latest = mergedList.find(o => o.orderId === orderId);
+      saveOrderToDb(latest);
+      return mergedList;
+    });
   };
  
   const currentOrder = filteredOrders[activeTab] || {};
@@ -109,11 +151,46 @@ function Ordermanage() {
     updateOrder(activeTab, { [field]: value });
   };
 
+  // Adjust items rows to match order quantity
+  const adjustItemsCount = (count) => {
+    const desired = Math.max(0, parseInt(count || '0', 10));
+    let newItems = [...(currentOrder.items || [])];
+    if (desired > newItems.length) {
+      const toAdd = desired - newItems.length;
+      for (let i = 0; i < toAdd; i++) {
+        newItems.push({
+          sno: newItems.length + 1,
+          ornamentType: 'Necklace',
+          weight: '',
+          advance: '',
+          customerNotes: '',
+          photo: null,
+          status: ORDER_STATUS.PENDING,
+          itemStatus: ITEM_STATUS.WITH_WORKER,
+          notes: '',
+          isSubmitted: false
+        });
+      }
+    } else if (desired < newItems.length) {
+      newItems = newItems.slice(0, desired).map((it, idx) => ({ ...it, sno: idx + 1 }));
+    }
+    updateOrder(activeTab, { items: newItems, orderWeightage: count });
+  };
+
   const handleItemChange = (idx, field, value) => {
     const newItems = currentOrder.items.map((item, i) => 
       i === idx ? { ...item, [field]: value } : item
     );
     updateOrder(activeTab, { items: newItems });
+  };
+
+  // Update daily checklist helper
+  const setChecklist = (dayKey, field, value) => {
+    const updated = {
+      ...(currentOrder.dailyChecklist || {}),
+      [dayKey]: { ...(currentOrder.dailyChecklist?.[dayKey] || {}), [field]: value }
+    };
+    updateOrder(activeTab, { dailyChecklist: updated });
   };
 
   const addItem = () => {
@@ -145,14 +222,18 @@ function Ordermanage() {
   };
  
   const addTab = () => {
-    setOrders((prev) => [
-      ...prev,
-      {
+    setOrders((prev) => {
+      const newOrder = {
         orderId: getNextOrderId(prev),
+        orderType: '',
         customer: { name: '', contact: '', address: '' },
         subQuantity: '',
         totalWeight: '',
         advance: '',
+        advanceType: 'AMOUNT',
+        advanceGoldGms: '',
+        advanceGoldRate: '',
+        advanceAmountRate: '',
         requestedDeliveryDate: '',
         orderWeightage: '',
         orderPeopleContact: '',
@@ -174,9 +255,22 @@ function Ordermanage() {
         isPlaced: false,
         reminderActive: false,
         reminderCount: 0,
-      },
-    ]);
-    setActiveTab(filteredOrders.length);
+        dailyChecklist: {
+          day1: { status: 'NA', note: '' },
+          day2: { status: 'NA', note: '' },
+          day3: { status: 'NA', note: '' },
+          day4: { deptVerified: false, workerVerified: false, note: '' },
+          day5: { status: 'NA', note: '' },
+          day6: { status: 'NA', note: '' },
+          day7: { location: 'NA', note: '' },
+          day8: { location: 'NA', note: '' }
+        }
+      };
+      const list = [...prev, newOrder];
+      saveOrderToDb(newOrder);
+      setActiveTab(list.length - 1);
+      return list;
+    });
   };
 
   const removeTab = (filteredIdx) => {
@@ -312,7 +406,7 @@ function Ordermanage() {
       let message = `🔔 *NEW ORDER RECEIVED*\n\n`;
       message += `📋 *Order ID:* ${order.orderId}\n`;
       message += `👤 *Customer:* ${order.customer.name || 'N/A'}\n`;
-      message += `📞 *Contact:* ${order.customer.contact || 'N/A'}\n`;
+      // Contact is intentionally omitted from WhatsApp message per requirement
       
       if (order.requestedDeliveryDate) {
         const deliveryDate = new Date(order.requestedDeliveryDate).toLocaleDateString();
@@ -321,6 +415,15 @@ function Ordermanage() {
       
       if (order.totalWeight) message += `⚖️ *Total Weight:* ${order.totalWeight} gms\n`;
       if (order.orderWeightage) message += `📊 *Order Quantity:* ${order.orderWeightage}\n`;
+      if (order.orderType) message += `🧩 *Order Type:* ${order.orderType === 'GROUP' ? 'Group' : 'Individual'}\n`;
+
+      // Advance details
+      if (order.advanceType === 'AMOUNT') {
+        if (order.advance) message += `💰 *Advance Amount:* ₹${order.advance}\n`;
+      } else if (order.advanceType === 'GOLD') {
+        if (order.advanceGoldGms) message += `🥇 *Advance Gold:* ${order.advanceGoldGms} gms\n`;
+        if (order.advanceGoldRate) message += `💱 *Advance Gold Rate:* ₹${order.advanceGoldRate}/g\n`;
+      }
       
       message += `\n📝 *ITEMS DETAILS:*\n`;
       message += `━━━━━━━━━━━━━━━━━━━━\n`;
@@ -331,10 +434,7 @@ function Ordermanage() {
         if (item.customerNotes) message += `   Notes: ${item.customerNotes}\n`;
         message += `   ────────────────────\n`;
       });
-      
-      if (order.customer.address) {
-        message += `\n📍 *Address:*\n${order.customer.address}\n`;
-      }
+      // Address is intentionally omitted from WhatsApp message per requirement
 
       // Clean phone number
       const phoneNumber = order.orderPeopleContact.replace(/\D/g, '');
@@ -420,6 +520,28 @@ function Ordermanage() {
               </p>
             </div>
             
+            {/* Order Type Selection Gate */}
+            {!currentOrder.orderType && (
+              <div className="bg-white rounded-2xl shadow-2xl border border-yellow-100 p-6 mb-6">
+                <h3 className="text-xl font-bold text-yellow-800 mb-4">Select Order Type</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button
+                    className="p-4 rounded-xl border-2 border-yellow-300 hover:border-yellow-400 bg-yellow-50 text-yellow-900 font-bold"
+                    onClick={() => updateOrder(activeTab, { orderType: 'INDIVIDUAL' })}
+                  >
+                    🙍‍♂️ Individual Order
+                  </button>
+                  <button
+                    className="p-4 rounded-xl border-2 border-amber-300 hover:border-amber-400 bg-amber-50 text-amber-900 font-bold"
+                    onClick={() => updateOrder(activeTab, { orderType: 'GROUP' })}
+                  >
+                    👥 Group Order
+                  </button>
+                </div>
+                <p className="text-xs text-gray-600 mt-3">Choose an order type to continue.</p>
+              </div>
+            )}
+
             <div className="flex flex-col md:flex-row md:items-center gap-4">
               <button
                 className="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-white font-bold text-base shadow-lg transition-all duration-200 transform hover:scale-105"
@@ -529,6 +651,7 @@ function Ordermanage() {
                 </button>
               </div>
               {/* Order Form */}
+              {currentOrder.orderType && (
               <div className="bg-white rounded-3xl shadow-2xl border border-yellow-100 p-8">
                 {/* Order Header */}
                 <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-6 mb-8">
@@ -548,6 +671,11 @@ function Ordermanage() {
                         )}
                       </h2>
                       <p className="text-gray-600 mt-1">Manage order details and track progress</p>
+                      <div className="mt-2">
+                        <span className="px-3 py-1 rounded-xl text-sm font-bold border-2 border-yellow-300 bg-yellow-50 text-yellow-800">
+                          🧩 Order Type: {currentOrder.orderType === 'GROUP' ? 'Group' : 'Individual'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div className="flex flex-col md:flex-row md:items-start gap-4">
@@ -638,17 +766,68 @@ function Ordermanage() {
                         disabled={currentOrder.isPlaced}
                       />
                     </div>
+                    {/* Advance Type */}
                     <div>
-                      <label className="block text-sm font-bold text-amber-800 mb-2">💰 Advance Amount</label>
-                      <input
-                        type="text"
-                        value={currentOrder.advance || ''}
-                        onChange={(e) => handleOrderFieldChange('advance', e.target.value)}
-                        className="w-full px-4 py-3 border-2 border-amber-200 rounded-2xl focus:ring-4 focus:ring-amber-200 focus:border-amber-400 shadow-lg transition-all duration-200"
-                        placeholder="Advance payment"
-                        disabled={currentOrder.isPlaced}
-                      />
+                      <label className="block text-sm font-bold text-amber-800 mb-2">💳 Advance Type</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          className={`px-3 py-2 rounded-xl border-2 ${currentOrder.advanceType === 'AMOUNT' ? 'border-green-500 bg-green-50' : 'border-amber-200 bg-white'} text-sm font-bold`}
+                          onClick={() => updateOrder(activeTab, { advanceType: 'AMOUNT' })}
+                          disabled={currentOrder.isPlaced}
+                        >
+                          ₹ Amount
+                        </button>
+                        <button
+                          type="button"
+                          className={`px-3 py-2 rounded-xl border-2 ${currentOrder.advanceType === 'GOLD' ? 'border-yellow-500 bg-yellow-50' : 'border-amber-200 bg-white'} text-sm font-bold`}
+                          onClick={() => updateOrder(activeTab, { advanceType: 'GOLD' })}
+                          disabled={currentOrder.isPlaced}
+                        >
+                          🥇 Gold
+                        </button>
+                      </div>
                     </div>
+                    {currentOrder.advanceType === 'AMOUNT' ? (
+                      <>
+                        <div>
+                          <label className="block text-sm font-bold text-amber-800 mb-2">💰 Advance Amount (₹)</label>
+                          <input
+                            type="number"
+                            value={currentOrder.advance || ''}
+                            onChange={(e) => handleOrderFieldChange('advance', e.target.value)}
+                            className="w-full px-4 py-3 border-2 border-amber-200 rounded-2xl focus:ring-4 focus:ring-amber-200 focus:border-amber-400 shadow-lg transition-all duration-200"
+                            placeholder="Advance payment in rupees"
+                            disabled={currentOrder.isPlaced}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-bold text-amber-800 mb-2">💱 Rate (₹/g)</label>
+                          <input
+                            type="number"
+                            value={currentOrder.advanceAmountRate || ''}
+                            onChange={(e) => handleOrderFieldChange('advanceAmountRate', e.target.value)}
+                            className="w-full px-4 py-3 border-2 border-amber-200 rounded-2xl focus:ring-4 focus:ring-amber-200 focus:border-amber-400 shadow-lg transition-all duration-200"
+                            placeholder="Enter rate per gram"
+                            disabled={currentOrder.isPlaced}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block text-sm font-bold text-amber-800 mb-2">🥇 Advance Gold (gms)</label>
+                          <input
+                            type="number"
+                            value={currentOrder.advanceGoldGms || ''}
+                            onChange={(e) => handleOrderFieldChange('advanceGoldGms', e.target.value)}
+                            className="w-full px-4 py-3 border-2 border-amber-200 rounded-2xl focus:ring-4 focus:ring-amber-200 focus:border-amber-400 shadow-lg transition-all duration-200"
+                            placeholder="Gold in grams"
+                            disabled={currentOrder.isPlaced}
+                          />
+                        </div>
+                      </>
+                    )}
                     <div>
                       <label className="block text-sm font-bold text-amber-800 mb-2">📅 Delivery Date</label>
                       <input
@@ -660,17 +839,22 @@ function Ordermanage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-bold text-amber-800 mb-2">📦 Order Quantity</label>
+                      <label className="block text-sm font-bold text-amber-800 mb-2">📦 Order Quantity (items)</label>
                       <input
-                        type="text"
+                        type="number"
                         value={currentOrder.orderWeightage || ''}
-                        onChange={(e) => handleOrderFieldChange('orderWeightage', e.target.value)}
+                        onChange={(e) => adjustItemsCount(e.target.value)}
                         className="w-full px-4 py-3 border-2 border-amber-200 rounded-2xl focus:ring-4 focus:ring-amber-200 focus:border-amber-400 shadow-lg transition-all duration-200"
-                        placeholder="Quantity/Weightage"
+                        placeholder="Number of items"
                         disabled={currentOrder.isPlaced}
                       />
                     </div>
                   </div>
+                  {currentOrder.advanceType === 'GOLD' && (
+                    <div className="mt-4 bg-white rounded-xl p-4 border border-amber-200">
+                      <div className="text-sm text-amber-800 font-bold">Estimated Advance Value: ₹{((parseFloat(currentOrder.advanceGoldGms) || 0) * (parseFloat(currentOrder.advanceGoldRate) || 0)).toFixed(2)}</div>
+                    </div>
+                  )}
                 </div>
                 {/* Items Table */}
                 <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-2xl p-6 mb-8 border border-orange-200">
@@ -875,6 +1059,113 @@ function Ordermanage() {
                   </div>
                 </div>
 
+                {/* Daily Workflow Checklist */}
+                <div className="bg-gradient-to-r from-yellow-50 to-amber-50 rounded-2xl p-6 mb-8 border border-yellow-200">
+                  <h3 className="text-xl font-bold text-yellow-800 mb-6">🗓️ Daily Workflow</h3>
+                  {/* Day 1 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold text-yellow-900 w-16">Day 1</span>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name="d1" checked={currentOrder.dailyChecklist?.day1?.status === 'FORWARDED'} onChange={() => setChecklist('day1', 'status', 'FORWARDED')} disabled={currentOrder.isPlaced && false} />
+                        Order forwarded to Department
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name="d1" checked={currentOrder.dailyChecklist?.day1?.status === 'NOT_FORWARDED'} onChange={() => setChecklist('day1', 'status', 'NOT_FORWARDED')} />
+                        Not forwarded
+                      </label>
+                    </div>
+                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day1?.note || ''} onChange={e => setChecklist('day1', 'note', e.target.value)} />
+                  </div>
+                  {/* Day 2 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold text-yellow-900 w-16">Day 2</span>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name="d2" checked={currentOrder.dailyChecklist?.day2?.status === 'PLACED'} onChange={() => setChecklist('day2', 'status', 'PLACED')} />
+                        Order placed
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name="d2" checked={currentOrder.dailyChecklist?.day2?.status === 'NOT_PLACED'} onChange={() => setChecklist('day2', 'status', 'NOT_PLACED')} />
+                        Order not placed
+                      </label>
+                    </div>
+                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day2?.note || ''} onChange={e => setChecklist('day2', 'note', e.target.value)} />
+                  </div>
+                  {/* Day 3 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold text-yellow-900 w-16">Day 3</span>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name="d3" checked={currentOrder.dailyChecklist?.day3?.status === 'INITIATED'} onChange={() => setChecklist('day3', 'status', 'INITIATED')} />
+                        Work initiated
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="radio" name="d3" checked={currentOrder.dailyChecklist?.day3?.status === 'NOT_INITIATED'} onChange={() => setChecklist('day3', 'status', 'NOT_INITIATED')} />
+                        Not initiated
+                      </label>
+                    </div>
+                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day3?.note || ''} onChange={e => setChecklist('day3', 'note', e.target.value)} />
+                  </div>
+                  {/* Day 4 Verification */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="flex items-center gap-4">
+                      <span className="font-semibold text-yellow-900 w-16">Day 4</span>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={currentOrder.dailyChecklist?.day4?.deptVerified || false} onChange={e => setChecklist('day4', 'deptVerified', e.target.checked)} />
+                        Dept verified
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={currentOrder.dailyChecklist?.day4?.workerVerified || false} onChange={e => setChecklist('day4', 'workerVerified', e.target.checked)} />
+                        Worker verified
+                      </label>
+                    </div>
+                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day4?.note || ''} onChange={e => setChecklist('day4', 'note', e.target.value)} />
+                  </div>
+                  {/* Day 5/6 Status */}
+                  {['day5','day6'].map((dayKey, i) => (
+                    <div key={dayKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-yellow-900 w-16">Day {i+5}</span>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.status === 'IN_PROGRESS'} onChange={() => setChecklist(dayKey, 'status', 'IN_PROGRESS')} />
+                          Work in progress
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.status === 'DELAY'} onChange={() => setChecklist(dayKey, 'status', 'DELAY')} />
+                          Work in delay
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.status === 'COMPLETED'} onChange={() => setChecklist(dayKey, 'status', 'COMPLETED')} />
+                          Work completed
+                        </label>
+                      </div>
+                      <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.[dayKey]?.note || ''} onChange={e => setChecklist(dayKey, 'note', e.target.value)} />
+                    </div>
+                  ))}
+                  {/* Day 7/8 Location */}
+                  {['day7','day8'].map((dayKey, i) => (
+                    <div key={dayKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-yellow-900 w-16">Day {i+7}</span>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.location === 'WORKER'} onChange={() => setChecklist(dayKey, 'location', 'WORKER')} />
+                          Item with worker
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.location === 'DEPARTMENT'} onChange={() => setChecklist(dayKey, 'location', 'DEPARTMENT')} />
+                          Item with department
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.location === 'DELIVERED'} onChange={() => setChecklist(dayKey, 'location', 'DELIVERED')} />
+                          Item delivered to customer
+                        </label>
+                      </div>
+                      <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.[dayKey]?.note || ''} onChange={e => setChecklist(dayKey, 'note', e.target.value)} />
+                    </div>
+                  ))}
+                </div>
+
                 {/* Action Buttons */}
                 <div className="flex gap-6 justify-end">
                   {!currentOrder.isPlaced ? (
@@ -932,6 +1223,7 @@ function Ordermanage() {
                           }
                           
                           // Remove the order from the database
+                          deleteDoc(doc(db, 'orders', currentOrder.orderId)).catch(() => {});
                           const orderId = currentOrder.orderId;
                           const newOrders = orders.filter(order => order.orderId !== orderId);
                           setOrders(newOrders);
@@ -985,6 +1277,7 @@ function Ordermanage() {
                   )}
                 </div>
               </div>
+              )}
             </>
           )}
 
