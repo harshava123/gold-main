@@ -3,6 +3,8 @@ import Employeeheader from './Employeeheader';
 import { FaPlus, FaTrash, FaWhatsapp, FaTimes, FaEdit, FaSave, FaEye } from 'react-icons/fa';
 import { db } from '../../../firebase';
 import { doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { useStore } from '../Admin/StoreContext';
  
 const ORNAMENT_TYPES = [
@@ -85,7 +87,8 @@ function Ordermanage() {
         day6: { status: 'NA', note: '' },
         day7: { location: 'NA', note: '' }, // WORKER | DEPARTMENT | DELIVERED | NA
         day8: { location: 'NA', note: '' }
-      }
+      },
+      dailyPlan: {}
     },
   ]);
 
@@ -140,6 +143,15 @@ function Ordermanage() {
   };
  
   const currentOrder = filteredOrders[activeTab] || {};
+  // Ensure Day 1 exists by default
+  React.useEffect(() => {
+    if (!currentOrder || !currentOrder.orderId) return;
+    const hasPlan = currentOrder.dailyPlan && Object.keys(currentOrder.dailyPlan).length > 0;
+    if (!hasPlan) {
+      updateOrder(activeTab, { dailyPlan: { 1: { status: 'NA', note: '' } } });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, currentOrder.orderId]);
 
   const handleCustomerChange = (field, value) => {
     updateOrder(activeTab, { 
@@ -191,6 +203,66 @@ function Ordermanage() {
       [dayKey]: { ...(currentOrder.dailyChecklist?.[dayKey] || {}), [field]: value }
     };
     updateOrder(activeTab, { dailyChecklist: updated });
+  };
+
+  // Add a day row manually (+ button)
+  const addWorkflowDay = () => {
+    const plan = { ...(currentOrder.dailyPlan || {}) };
+    const keys = Object.keys(plan).map(k => Number(k)).sort((a,b)=>a-b);
+    const next = (keys[keys.length - 1] || 0) + 1;
+    plan[next] = { status: 'NA', note: '' };
+    updateOrder(activeTab, { dailyPlan: plan });
+  };
+  const getDayOptions = (d) => {
+    switch (d) {
+      case 1:
+        return [
+          { value: 'FORWARDED', label: 'Order forwarded to Department' },
+          { value: 'NOT_FORWARDED', label: 'Not forwarded' },
+          { value: 'CUSTOM', label: 'Custom…' }
+        ];
+      case 2:
+        return [
+          { value: 'PLACED', label: 'Order placed' },
+          { value: 'NOT_PLACED', label: 'Order not placed' },
+          { value: 'CUSTOM', label: 'Custom…' }
+        ];
+      case 3:
+        return [
+          { value: 'INITIATED', label: 'Work initiated' },
+          { value: 'NOT_INITIATED', label: 'Not initiated' },
+          { value: 'CUSTOM', label: 'Custom…' }
+        ];
+      case 4:
+        return [
+          { value: 'DEPT_VERIFIED', label: 'Dept verified' },
+          { value: 'WORKER_VERIFIED', label: 'Worker verified' },
+          { value: 'CUSTOM', label: 'Custom…' }
+        ];
+      case 5:
+      case 6:
+        return [
+          { value: 'IN_PROGRESS', label: 'Work in progress' },
+          { value: 'DELAY', label: 'Work in delay' },
+          { value: 'COMPLETED', label: 'Work completed' },
+          { value: 'CUSTOM', label: 'Custom…' }
+        ];
+      case 7:
+      case 8:
+        return [
+          { value: 'WORKER', label: 'Item with worker' },
+          { value: 'DEPARTMENT', label: 'Item with department' },
+          { value: 'DELIVERED', label: 'Item delivered to customer' },
+          { value: 'CUSTOM', label: 'Custom…' }
+        ];
+      default:
+        return [
+          { value: 'IN_PROGRESS', label: 'Work in progress' },
+          { value: 'DELAY', label: 'Work in delay' },
+          { value: 'COMPLETED', label: 'Work completed' },
+          { value: 'CUSTOM', label: 'Custom…' }
+        ];
+    }
   };
 
   const addItem = () => {
@@ -1062,108 +1134,35 @@ function Ordermanage() {
                 {/* Daily Workflow Checklist */}
                 <div className="bg-gradient-to-r from-yellow-50 to-amber-50 rounded-2xl p-6 mb-8 border border-yellow-200">
                   <h3 className="text-xl font-bold text-yellow-800 mb-6">🗓️ Daily Workflow</h3>
-                  {/* Day 1 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="flex items-center gap-3">
-                      <span className="font-semibold text-yellow-900 w-16">Day 1</span>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="d1" checked={currentOrder.dailyChecklist?.day1?.status === 'FORWARDED'} onChange={() => setChecklist('day1', 'status', 'FORWARDED')} disabled={currentOrder.isPlaced && false} />
-                        Order forwarded to Department
-                      </label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="d1" checked={currentOrder.dailyChecklist?.day1?.status === 'NOT_FORWARDED'} onChange={() => setChecklist('day1', 'status', 'NOT_FORWARDED')} />
-                        Not forwarded
-                      </label>
-                    </div>
-                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day1?.note || ''} onChange={e => setChecklist('day1', 'note', e.target.value)} />
+                  {/* Manual day-by-day plan with Day selector */}
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="text-sm text-yellow-800 font-semibold">Start with Day 1. Use "+ Add Next Day" to add Day 2, Day 3, ...</div>
+                    <button type="button" onClick={addWorkflowDay} className="px-3 py-2 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-bold">+ Add Next Day</button>
                   </div>
-                  {/* Day 2 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="flex items-center gap-3">
-                      <span className="font-semibold text-yellow-900 w-16">Day 2</span>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="d2" checked={currentOrder.dailyChecklist?.day2?.status === 'PLACED'} onChange={() => setChecklist('day2', 'status', 'PLACED')} />
-                        Order placed
-                      </label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="d2" checked={currentOrder.dailyChecklist?.day2?.status === 'NOT_PLACED'} onChange={() => setChecklist('day2', 'status', 'NOT_PLACED')} />
-                        Order not placed
-                      </label>
-                    </div>
-                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day2?.note || ''} onChange={e => setChecklist('day2', 'note', e.target.value)} />
+                  <div className="space-y-4">
+                    {Object.keys(currentOrder.dailyPlan || {}).sort((a,b)=>Number(a)-Number(b)).map(key => {
+                      const d = Number(key);
+                      const status = currentOrder.dailyPlan?.[d]?.status || 'NA';
+                      const options = getDayOptions(d);
+                      return (
+                        <div key={d} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span className="font-semibold text-yellow-900 w-16">Day {d}</span>
+                            <select className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" value={status} onChange={e => updateOrder(activeTab, { dailyPlan: { ...(currentOrder.dailyPlan||{}), [d]: { ...(currentOrder.dailyPlan?.[d]||{}), status: e.target.value } } })}>
+                              <option value="NA">Select status</option>
+                              {options.map(o => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                            </select>
+                            {status === 'CUSTOM' && (
+                              <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm w-48 md:w-60" placeholder="Custom status" value={currentOrder.dailyPlan?.[d]?.custom || ''} onChange={e => updateOrder(activeTab, { dailyPlan: { ...(currentOrder.dailyPlan||{}), [d]: { ...(currentOrder.dailyPlan?.[d]||{}), custom: e.target.value } } })} />
+                            )}
+                            <button type="button" onClick={() => removeWorkflowDay(d)} className="px-2 py-1 text-xs rounded-lg bg-red-500 hover:bg-red-600 text-white">Remove</button>
+                          </div>
+                          <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm w-full" placeholder="Note" value={currentOrder.dailyPlan?.[d]?.note || ''} onChange={e => updateOrder(activeTab, { dailyPlan: { ...(currentOrder.dailyPlan||{}), [d]: { ...(currentOrder.dailyPlan?.[d]||{}), note: e.target.value } } })} />
+                        </div>
+                      );
+                    })}
                   </div>
-                  {/* Day 3 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="flex items-center gap-3">
-                      <span className="font-semibold text-yellow-900 w-16">Day 3</span>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="d3" checked={currentOrder.dailyChecklist?.day3?.status === 'INITIATED'} onChange={() => setChecklist('day3', 'status', 'INITIATED')} />
-                        Work initiated
-                      </label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="radio" name="d3" checked={currentOrder.dailyChecklist?.day3?.status === 'NOT_INITIATED'} onChange={() => setChecklist('day3', 'status', 'NOT_INITIATED')} />
-                        Not initiated
-                      </label>
-                    </div>
-                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day3?.note || ''} onChange={e => setChecklist('day3', 'note', e.target.value)} />
-                  </div>
-                  {/* Day 4 Verification */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="flex items-center gap-4">
-                      <span className="font-semibold text-yellow-900 w-16">Day 4</span>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={currentOrder.dailyChecklist?.day4?.deptVerified || false} onChange={e => setChecklist('day4', 'deptVerified', e.target.checked)} />
-                        Dept verified
-                      </label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={currentOrder.dailyChecklist?.day4?.workerVerified || false} onChange={e => setChecklist('day4', 'workerVerified', e.target.checked)} />
-                        Worker verified
-                      </label>
-                    </div>
-                    <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.day4?.note || ''} onChange={e => setChecklist('day4', 'note', e.target.value)} />
-                  </div>
-                  {/* Day 5/6 Status */}
-                  {['day5','day6'].map((dayKey, i) => (
-                    <div key={dayKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div className="flex items-center gap-3">
-                        <span className="font-semibold text-yellow-900 w-16">Day {i+5}</span>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.status === 'IN_PROGRESS'} onChange={() => setChecklist(dayKey, 'status', 'IN_PROGRESS')} />
-                          Work in progress
-                        </label>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.status === 'DELAY'} onChange={() => setChecklist(dayKey, 'status', 'DELAY')} />
-                          Work in delay
-                        </label>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.status === 'COMPLETED'} onChange={() => setChecklist(dayKey, 'status', 'COMPLETED')} />
-                          Work completed
-                        </label>
-                      </div>
-                      <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.[dayKey]?.note || ''} onChange={e => setChecklist(dayKey, 'note', e.target.value)} />
-                    </div>
-                  ))}
-                  {/* Day 7/8 Location */}
-                  {['day7','day8'].map((dayKey, i) => (
-                    <div key={dayKey} className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div className="flex items-center gap-3">
-                        <span className="font-semibold text-yellow-900 w-16">Day {i+7}</span>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.location === 'WORKER'} onChange={() => setChecklist(dayKey, 'location', 'WORKER')} />
-                          Item with worker
-                        </label>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.location === 'DEPARTMENT'} onChange={() => setChecklist(dayKey, 'location', 'DEPARTMENT')} />
-                          Item with department
-                        </label>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input type="radio" name={`${dayKey}`} checked={currentOrder.dailyChecklist?.[dayKey]?.location === 'DELIVERED'} onChange={() => setChecklist(dayKey, 'location', 'DELIVERED')} />
-                          Item delivered to customer
-                        </label>
-                      </div>
-                      <input className="px-3 py-2 border-2 border-yellow-200 rounded-xl text-sm" placeholder="Note" value={currentOrder.dailyChecklist?.[dayKey]?.note || ''} onChange={e => setChecklist(dayKey, 'note', e.target.value)} />
-                    </div>
-                  ))}
+                  {/* Old static Day 1-8 radios/checkboxes removed as requested */}
                 </div>
 
                 {/* Action Buttons */}
@@ -1222,6 +1221,28 @@ function Ordermanage() {
                             });
                           }
                           
+                          // Generate and auto-download order report PDF
+                          try {
+                            const docx = new jsPDF();
+                            docx.setFontSize(14);
+                            docx.text(`Order Report - ${currentOrder.orderId}`, 14, 16);
+                            docx.setFontSize(10);
+                            const rows = [
+                              ['Customer', currentOrder.customer?.name || '-'],
+                              ['Order Type', currentOrder.orderType || '-'],
+                              ['Total Weight', currentOrder.totalWeight || '-'],
+                              ['Advance', currentOrder.advanceType === 'GOLD' ? `${currentOrder.advanceGoldGms||0} g @ ₹${currentOrder.advanceGoldRate||0}` : (currentOrder.advance ? `₹${currentOrder.advance}` : '-')],
+                              ['Delivery', currentOrder.requestedDeliveryDate || '-'],
+                            ];
+                            autoTable(docx, { startY: 20, head: [['Field','Value']], body: rows, styles: { fontSize: 9 } });
+                            let y = docx.lastAutoTable.finalY + 6;
+                            docx.setFontSize(12);
+                            docx.text('Daily Plan', 14, y); y += 4;
+                            const planRows = Object.keys(currentOrder.dailyPlan||{}).map(k => [`Day ${k}`, currentOrder.dailyPlan[k]?.status || 'NA', currentOrder.dailyPlan[k]?.note || '' ]);
+                            autoTable(docx, { startY: y, head: [['Day','Status','Note']], body: planRows, styles: { fontSize: 9 } });
+                            docx.save(`${currentOrder.orderId}_report.pdf`);
+                          } catch {}
+
                           // Remove the order from the database
                           deleteDoc(doc(db, 'orders', currentOrder.orderId)).catch(() => {});
                           const orderId = currentOrder.orderId;
