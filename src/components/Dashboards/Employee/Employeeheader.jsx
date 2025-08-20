@@ -108,7 +108,7 @@ function Employeeheader() {
             Orders
           </Link>
           <Link to="/employee/reports" className="flex items-center gap-1 px-3 py-1.5 rounded-md text-white hover:bg-amber-800/60 transition font-medium text-sm border border-yellow-400/30">
-            <FaShoppingCart className="w-4 h-4 text-yellow-300" />
+            <FaFileAlt className="w-4 h-4 text-yellow-300" />
             Reports
           </Link>
         </nav>

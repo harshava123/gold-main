@@ -42,10 +42,7 @@ function Purchases() {
   
   const { selectedStore } = useStore();
   
-  // Navigate to employee dashboard if no store is selected
-  useEffect(() => {
-    if (!selectedStore) navigate('/employee');
-  }, [selectedStore, navigate]);
+  // Note: Navigation guard removed to avoid blocking in Vercel static routing
 
   useEffect(() => {
     if (mainType === 'GOLD') setSubType('KACHA_GOLD');

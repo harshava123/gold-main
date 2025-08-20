@@ -19,10 +19,7 @@ function Sales() {
   
   const { selectedStore } = useStore();
   
-  // Navigate to employee dashboard if no store is selected
-  useEffect(() => {
-    if (!selectedStore) navigate('/employee');
-  }, [selectedStore, navigate]);
+  // Note: Navigation guard removed to allow access even if no store is selected
 
   // Payment source labels
   const localLabel = saleType === 'SILVER' ? 'Pay from local silver' : 'Pay from local gold';

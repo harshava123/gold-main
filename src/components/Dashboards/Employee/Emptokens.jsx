@@ -17,10 +17,7 @@ function Emptokens() {
   const navigate = useNavigate();
   const { selectedStore } = useStore();
   
-  // Navigate to employee dashboard if no store is selected
-  useEffect(() => {
-    if (!selectedStore) navigate('/employee');
-  }, [selectedStore, navigate]);
+  // Note: Navigation guard removed to avoid blocking routes on Vercel
  
   useEffect(() => {
     const fetchTokenCount = async () => {

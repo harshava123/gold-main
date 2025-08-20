@@ -22,10 +22,7 @@ function Exchanges() {
   
   const { selectedStore } = useStore();
   
-  // Navigate to employee dashboard if no store is selected
-  useEffect(() => {
-    if (!selectedStore) navigate('/employee');
-  }, [selectedStore, navigate]);
+  // Note: Navigation guard removed to avoid blocking routes on Vercel
 
   // Determine labels based on type
   const localLabel = form.type === 'SILVER' ? 'Pay from local silver' : 'Pay from local gold';

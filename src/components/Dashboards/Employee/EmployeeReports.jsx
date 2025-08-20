@@ -308,7 +308,7 @@ function EmployeeReports() {
   const daySalesAmount = daySales.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0);
   const dayTokensAmount = dayTokens.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
   const dayPurchasesAmount = dayPurchases.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-  const dayExchangesAmount = dayExchanges.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  const dayExchangesFine = dayExchanges.reduce((sum, e) => sum + (parseFloat(e.fine) || 0), 0);
 
   const dayCashInflows = daySalesAmount + dayTokensAmount;
   const dayCashOutflows = dayPurchasesAmount;
@@ -346,7 +346,7 @@ function EmployeeReports() {
   const handleExportExcelEx = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Exchanges Report');
-    const columns = ['Date', 'Employee', 'Type', 'Source', 'Name', 'Weight', 'Touch', 'Less', 'Fine', 'Amount'];
+    const columns = ['Date', 'Employee', 'Type', 'Source', 'Name', 'Weight', 'Touch', 'Less', 'Fine', 'Amount (₹, silver only)'];
     const headerRow = worksheet.getRow(1);
     columns.forEach((c, i) => { const cell = headerRow.getCell(i + 1); cell.value = c; cell.font = { bold: true }; });
     filteredEx.forEach((ex, r) => {
@@ -365,7 +365,7 @@ function EmployeeReports() {
   const handleExportPDFEx = () => {
     const doc = new jsPDF();
     doc.setFontSize(16); doc.text('Exchanges Report', 14, 18);
-    const tableColumn = ['Date', 'Employee', 'Type', 'Source', 'Name', 'Weight', 'Touch', 'Less', 'Fine', 'Amount'];
+    const tableColumn = ['Date', 'Employee', 'Type', 'Source', 'Name', 'Weight', 'Touch', 'Less', 'Fine', 'Amount (₹, silver only)'];
     const tableRows = filteredEx.map(ex => [ex.date || '', ex.employee || '', ex.type || '', ex.source || '', ex.name || '', ex.weight || '', ex.touch || '', ex.less || '', ex.fine || '', ex.amount || '']);
     autoTable(doc, { head: [tableColumn], body: tableRows, startY: 24, styles: { fontSize: 8, cellPadding: 2 } });
     doc.save('exchanges_report.pdf');
@@ -476,7 +476,7 @@ function EmployeeReports() {
               </div>
               <div className="p-4 rounded-xl border bg-white">
                 <div className="font-semibold text-gray-800 mb-2">Daily Totals</div>
-                <div className="text-sm text-gray-700">Exchanges Amount: ₹{dayExchangesAmount.toFixed(2)}</div>
+                <div className="text-sm text-gray-700">Exchanges Fine (gms): {dayExchangesFine.toFixed(3)}</div>
                 <div className="text-sm text-gray-700">Total Transactions: {daySales.length + dayTokens.length + dayPurchases.length + dayExchanges.length}</div>
               </div>
               <div className="p-4 rounded-xl border bg-white flex items-center gap-2">
@@ -496,6 +496,7 @@ function EmployeeReports() {
                   ws.addRow([]);
                   ws.addRow(['Cash (₹)', 'Opening', balances.cash.opening, 'Closing', balances.cash.closing]);
                   ws.addRow(['Cash In (Sales)', daySalesAmount, 'Cash In (Tokens)', dayTokensAmount, 'Cash Out (Purchases)', dayPurchasesAmount]);
+                  ws.addRow(['Exchanges Fine (gms)', dayExchangesFine]);
                   ws.addRow(['Net Change', dayCashInflows - dayCashOutflows, 'Expected Closing', expectedCashClosing]);
                   ws.columns.forEach(col => { col.width = 22; });
                   const buffer = await workbook.xlsx.writeBuffer();
@@ -521,6 +522,7 @@ function EmployeeReports() {
                   doc.text(`Opening: ₹${balances.cash.opening}`, 18, y); y += 6;
                   doc.text(`Closing: ₹${balances.cash.closing}`, 18, y); y += 6;
                   doc.text(`Sales (in): ₹${daySalesAmount.toFixed(2)} | Tokens (in): ₹${dayTokensAmount.toFixed(2)} | Purchases (out): ₹${dayPurchasesAmount.toFixed(2)}`, 18, y); y += 6;
+                  doc.text(`Exchanges Fine (gms): ${dayExchangesFine.toFixed(3)}`, 18, y); y += 6;
                   doc.text(`Net Change: ₹${(dayCashInflows - dayCashOutflows).toFixed(2)} | Expected Closing: ₹${expectedCashClosing.toFixed(2)}`, 18, y); y += 10;
                   doc.save('daily_report.pdf');
                 }} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold shadow">Download Daily Report (PDF)</button>
