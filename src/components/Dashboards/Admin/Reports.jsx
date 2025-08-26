@@ -16,6 +16,7 @@ function Reports() {
   const [sales, setSales] = useState([]);
   const [cashMovements, setCashMovements] = useState([]);
   const [tokens, setTokens] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
@@ -252,12 +253,13 @@ function Reports() {
         };
 
         // Fetch all data with fallback
-        const [exchangesData, purchasesData, salesData, cashData, tokensData] = await Promise.all([
+        const [exchangesData, purchasesData, salesData, cashData, tokensData, ordersData] = await Promise.all([
           fetchWithFallback('exchanges'),
           fetchWithFallback('purchases'),
           fetchWithFallback('sales'),
           fetchWithFallback('cashmovements'),
-          fetchWithFallback('tokens')
+          fetchWithFallback('tokens'),
+          fetchWithFallback('orders')
         ]);
 
         setExchanges(exchangesData);
@@ -265,6 +267,7 @@ function Reports() {
         setSales(salesData);
         setCashMovements(cashData);
         setTokens(tokensData);
+        setOrders(ordersData);
       } catch (error) {
         console.error('Error fetching data:', error);
         showToast('Error loading reports data', 'error');
@@ -419,9 +422,11 @@ function Reports() {
         .join(' ')
         .toLowerCase()
         .includes(appliedFilters.search.toLowerCase());
+    const matchesType = appliedFilters.typeFilter === 'ALL' || pur.mainType === appliedFilters.typeFilter;
+    const matchesSource = appliedFilters.sourceFilter === 'ALL' || pur.subType === appliedFilters.sourceFilter;
     const matchesMonth = isDateInMonth(pur.date, appliedFilters.monthFilter);
     const matchesDateRange = isDateInRange(pur.date, appliedFilters.startDate, appliedFilters.endDate);
-    return matchesSearch && matchesMonth && matchesDateRange;
+    return matchesSearch && matchesType && matchesSource && matchesMonth && matchesDateRange;
   });
 
   // Filtering logic for sales
@@ -432,9 +437,11 @@ function Reports() {
         .join(' ')
         .toLowerCase()
         .includes(appliedFilters.search.toLowerCase());
+    const matchesType = appliedFilters.typeFilter === 'ALL' || sale.saleType === appliedFilters.typeFilter;
+    const matchesSource = appliedFilters.sourceFilter === 'ALL' || sale.source === appliedFilters.sourceFilter;
     const matchesMonth = isDateInMonth(sale.date, appliedFilters.monthFilter);
     const matchesDateRange = isDateInRange(sale.date, appliedFilters.startDate, appliedFilters.endDate);
-    return matchesSearch && matchesMonth && matchesDateRange;
+    return matchesSearch && matchesType && matchesSource && matchesMonth && matchesDateRange;
   });
 
   // Filtering logic for cash movements
@@ -460,6 +467,28 @@ function Reports() {
         .includes(appliedFilters.search.toLowerCase());
     const matchesMonth = isDateInMonth(token.date, appliedFilters.monthFilter);
     const matchesDateRange = isDateInRange(token.date, appliedFilters.startDate, appliedFilters.endDate);
+    return matchesSearch && matchesMonth && matchesDateRange;
+  });
+
+  // Filtering logic for orders (Order Management)
+  const filteredOrders = orders.filter(order => {
+    const matchesSearch =
+      appliedFilters.search === '' ||
+      Object.values({
+        orderId: order.orderId,
+        name: order.customer?.name,
+        contact: order.customer?.contact,
+        orderType: order.orderType,
+        status: order.orderStatus
+      })
+        .join(' ')
+        .toLowerCase()
+        .includes(appliedFilters.search.toLowerCase());
+
+    const created = order.createdAt?.toDate?.() || (order.createdAt ? new Date(order.createdAt) : null);
+    const dateStr = created ? created.toLocaleDateString('en-GB') : (order.requestedDeliveryDate || '');
+    const matchesMonth = isDateInMonth(dateStr, appliedFilters.monthFilter);
+    const matchesDateRange = isDateInRange(dateStr, appliedFilters.startDate, appliedFilters.endDate);
     return matchesSearch && matchesMonth && matchesDateRange;
   });
 
@@ -2152,6 +2181,7 @@ function Reports() {
               <button onClick={() => setTab('PURCHASES')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'PURCHASES' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Purchases</button>
               <button onClick={() => setTab('SALES')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'SALES' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Sales</button>
               <button onClick={() => setTab('CASH')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'CASH' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Cash Movements</button>
+              <button onClick={() => setTab('ORDERS')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'ORDERS' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Orders</button>
               <button onClick={() => setTab('TOKENS')} className={`px-6 py-2 rounded-lg font-bold ${tab === 'TOKENS' ? 'bg-yellow-400 text-black' : 'bg-gray-200 text-gray-700'}`}>Tokens</button>
             </div>
             <button
@@ -2176,7 +2206,7 @@ function Reports() {
                 onChange={e => setSearch(e.target.value)}
                 className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
               />
-              {tab === 'EXCHANGES' && (
+              {(tab === 'EXCHANGES' || tab === 'PURCHASES' || tab === 'SALES') && (
                 <>
                   <select
                     value={typeFilter}
@@ -2184,8 +2214,22 @@ function Reports() {
                     className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                   >
                     <option value="ALL">All Types</option>
-                    <option value="GOLD">Gold</option>
-                    <option value="SILVER">Silver</option>
+                    {tab === 'EXCHANGES' && (
+                      <>
+                        <option value="GOLD">Gold</option>
+                        <option value="SILVER">Silver</option>
+                      </>
+                    )}
+                    {tab === 'PURCHASES' && (
+                      [...new Set(purchases.map(p => p.mainType).filter(Boolean))].map(val => (
+                        <option key={val} value={val}>{val}</option>
+                      ))
+                    )}
+                    {tab === 'SALES' && (
+                      [...new Set(sales.map(s => s.saleType).filter(Boolean))].map(val => (
+                        <option key={val} value={val}>{val}</option>
+                      ))
+                    )}
                   </select>
                   <select
                     value={sourceFilter}
@@ -2193,10 +2237,24 @@ function Reports() {
                     className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-400"
                   >
                     <option value="ALL">All Sources</option>
-                    <option value="LOCAL GOLD">Local Gold</option>
-                    <option value="BANK GOLD">Bank Gold</option>
-                    <option value="LOCAL SILVER">Local Silver</option>
-                    <option value="KAMAL SILVER">Kamal Silver</option>
+                    {tab === 'EXCHANGES' && (
+                      <>
+                        <option value="LOCAL GOLD">Local Gold</option>
+                        <option value="BANK GOLD">Bank Gold</option>
+                        <option value="LOCAL SILVER">Local Silver</option>
+                        <option value="KAMAL SILVER">Kamal Silver</option>
+                      </>
+                    )}
+                    {tab === 'PURCHASES' && (
+                      [...new Set(purchases.map(p => p.subType).filter(Boolean))].map(val => (
+                        <option key={val} value={val}>{val}</option>
+                      ))
+                    )}
+                    {tab === 'SALES' && (
+                      [...new Set(sales.map(s => s.source).filter(Boolean))].map(val => (
+                        <option key={val} value={val}>{val}</option>
+                      ))
+                    )}
                   </select>
                 </>
               )}
@@ -2462,6 +2520,43 @@ function Reports() {
                         <td className="px-4 py-2 border">{token.purpose}</td>
                         <td className="px-4 py-2 border font-bold">₹{token.amount}</td>
                         <td className="px-4 py-2 border">{token.storeName}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : tab === 'ORDERS' ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full border border-gray-300 rounded-lg">
+                <thead className="bg-yellow-100">
+                  <tr>
+                    <th className="px-4 py-2 border">Order ID</th>
+                    <th className="px-4 py-2 border">Customer</th>
+                    <th className="px-4 py-2 border">Contact</th>
+                    <th className="px-4 py-2 border">Order Type</th>
+                    <th className="px-4 py-2 border">Status</th>
+                    <th className="px-4 py-2 border">Requested Delivery</th>
+                    <th className="px-4 py-2 border">Items</th>
+                    <th className="px-4 py-2 border">Total Weight</th>
+                    <th className="px-4 py-2 border">Advance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.length === 0 ? (
+                    <tr><td colSpan={9} className="text-center py-4">No orders found.</td></tr>
+                  ) : (
+                    filteredOrders.map((order, idx) => (
+                      <tr key={idx} className="hover:bg-yellow-50">
+                        <td className="px-4 py-2 border">{order.orderId}</td>
+                        <td className="px-4 py-2 border">{order.customer?.name || '-'}</td>
+                        <td className="px-4 py-2 border">{order.customer?.contact || '-'}</td>
+                        <td className="px-4 py-2 border">{order.orderType || '-'}</td>
+                        <td className="px-4 py-2 border">{order.orderStatus || '-'}</td>
+                        <td className="px-4 py-2 border">{order.requestedDeliveryDate || '-'}</td>
+                        <td className="px-4 py-2 border">{Array.isArray(order.items) ? order.items.length : 0}</td>
+                        <td className="px-4 py-2 border">{order.totalWeight || '-'}</td>
+                        <td className="px-4 py-2 border">{order.advanceType === 'GOLD' ? `${order.advanceGoldGms || 0} g` : (order.advance ? `₹${order.advance}` : '-')}</td>
                       </tr>
                     ))
                   )}

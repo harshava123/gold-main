@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import Employeeheader from './Employeeheader'
 import { Link } from 'react-router-dom'
-import { FaCoins, FaExchangeAlt, FaShoppingCart, FaClipboardList, FaChartLine, FaFileAlt, FaEdit, FaSave, FaTimes, FaClock, FaCalendarAlt } from 'react-icons/fa'
+import { FaCoins, FaExchangeAlt, FaShoppingCart, FaClipboardList, FaChartLine, FaFileAlt, FaEdit, FaSave, FaTimes, FaClock, FaCalendarAlt, FaStore } from 'react-icons/fa'
 import { GiGoldBar, GiJewelCrown, GiGoldNuggets } from 'react-icons/gi'
 import { db } from '../../../firebase'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { useStore } from '../Admin/StoreContext'
+import store1Image from '../../../assets/store1.jpg'
+import store2Image from '../../../assets/store2.jpg'
  
 const QUICK_ACTIONS = [
   {
@@ -86,7 +88,13 @@ function Employeedashboard() {
   const [localSilverTotal, setLocalSilverTotal] = useState(0);
   const [bankSilverTotal, setBankSilverTotal] = useState(0);
 
-  const { selectedStore } = useStore();
+  const { selectedStore, selectStore } = useStore();
+
+  // Store options
+  const stores = [
+    { id: 'store1', name: 'Store 1', location: 'Dilshuk Nagar', type: 'Traditional Jewelry', image: store1Image },
+    { id: 'store2', name: 'Store 2', location: 'Shopping Complex', type: 'Modern Designs', image: store2Image }
+  ];
  
   // Update time every second
   useEffect(() => {
@@ -267,6 +275,56 @@ function Employeedashboard() {
             </div>
           </div>
         </div>
+
+        {/* Store Selection Section */}
+        {!selectedStore ? (
+          <div className="text-center mb-12">
+            <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-8 shadow-xl border border-yellow-200">
+              <div className="flex items-center justify-center gap-3 mb-6">
+                <FaStore className="w-8 h-8 text-yellow-600" />
+                <h2 className="text-2xl font-bold text-yellow-700">Select Your Store</h2>
+              </div>
+              <p className="text-gray-600 mb-8">Please select a store to continue with your operations</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-4xl mx-auto">
+                {stores.map(store => (
+                  <div
+                    key={store.id}
+                    onClick={() => selectStore(store)}
+                    className="rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border-2 border-yellow-300 bg-white hover:border-yellow-500 hover:scale-105"
+                  >
+                    <div className="flex items-center gap-4">
+                      <img
+                        src={store.image}
+                        alt={store.name}
+                        className="w-16 h-16 object-cover rounded-xl shadow-md"
+                      />
+                      <div className="text-left">
+                        <h3 className="text-xl font-bold text-yellow-600">{store.name}</h3>
+                        <p className="text-gray-600 text-sm">{store.location}</p>
+                        <p className="text-gray-500 text-xs">{store.type}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center mb-8">
+            <div className="bg-gradient-to-r from-yellow-400 to-amber-500 rounded-2xl p-4 shadow-lg inline-block">
+              <div className="flex items-center gap-3 text-white">
+                <FaStore className="w-6 h-6" />
+                <span className="font-semibold">Currently Working: {selectedStore.name}</span>
+                <button
+                  onClick={() => selectStore(null)}
+                  className="ml-2 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-all duration-200"
+                >
+                  Change Store
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
  
         {/* Rate Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">

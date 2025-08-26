@@ -200,6 +200,9 @@ function PurchaseConfirm() {
             Dilshuknagar, Hyderabad
           </div>
           <div style="font-size: 12px; font-weight: bold; margin-bottom: 8px; text-align: center;">
+            PURCHASE ESTIMATION
+          </div>
+          <div style="font-size: 12px; font-weight: bold; margin-bottom: 8px; text-align: center;">
             ${data.mainType === 'GOLD' ? 'GOLD PURCHASE' : 'SILVER PURCHASE'}
           </div>
           <div style="font-size: 12px; font-weight: bold; margin-bottom: 8px; text-align: center;">

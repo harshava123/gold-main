@@ -18,6 +18,7 @@ function DailyReports({ transactionType, onClose }) {
   const [filters, setFilters] = useState({
     employee: '',
     type: '',
+    subType: '',
     source: '',
     mode: ''
   });
@@ -156,16 +157,30 @@ function DailyReports({ transactionType, onClose }) {
       );
     }
 
-    if (filters.type && transactionType === 'exchanges') {
-      filtered = filtered.filter(t => t.type === filters.type);
+    if (filters.type) {
+      if (transactionType === 'exchanges') {
+        filtered = filtered.filter(t => t.type === filters.type);
+      } else if (transactionType === 'purchases') {
+        filtered = filtered.filter(t => t.mainType === filters.type);
+      } else if (transactionType === 'sales') {
+        filtered = filtered.filter(t => t.saleType === filters.type);
+      }
+    }
+
+    if (filters.subType && transactionType === 'purchases') {
+      filtered = filtered.filter(t => t.subType === filters.subType);
     }
 
     if (filters.source) {
       filtered = filtered.filter(t => t.source === filters.source);
     }
 
-    if (filters.mode && transactionType === 'sales') {
-      filtered = filtered.filter(t => t.mode === filters.mode);
+    if (filters.mode) {
+      if (transactionType === 'sales') {
+        filtered = filtered.filter(t => t.mode === filters.mode);
+      } else if (transactionType === 'purchases') {
+        filtered = filtered.filter(t => t.paymentType === filters.mode);
+      }
     }
 
     setFilteredTransactions(filtered);
@@ -433,16 +448,26 @@ function DailyReports({ transactionType, onClose }) {
                 <FaFilter className="inline w-4 h-4 mr-2" />
                 Filters
               </label>
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-              >
-                {showFilters ? 'Hide Filters' : 'Show Filters'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                >
+                  {showFilters ? 'Hide Filters' : 'Show Filters'}
+                </button>
+                {showFilters && (
+                  <button
+                    onClick={() => setFilters({ employee: '', type: '', subType: '', source: '', mode: '' })}
+                    className="text-red-600 hover:text-red-700 text-sm font-medium"
+                  >
+                    Clear Filters
+                  </button>
+                )}
+              </div>
             </div>
 
             {showFilters && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 p-4 bg-gray-50 rounded-xl">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Employee</label>
                   <input
@@ -454,7 +479,7 @@ function DailyReports({ transactionType, onClose }) {
                   />
                 </div>
 
-                {transactionType === 'exchanges' && (
+                {(transactionType === 'exchanges' || transactionType === 'purchases' || transactionType === 'sales') && (
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
                     <select
@@ -463,14 +488,36 @@ function DailyReports({ transactionType, onClose }) {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
                       <option value="">All Types</option>
-                      {getUniqueValues('type').map(type => (
+                      {transactionType === 'exchanges' && getUniqueValues('type').map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                      {transactionType === 'purchases' && getUniqueValues('mainType').map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                      {transactionType === 'sales' && getUniqueValues('saleType').map(type => (
                         <option key={type} value={type}>{type}</option>
                       ))}
                     </select>
                   </div>
                 )}
 
-                {(transactionType === 'exchanges' || transactionType === 'sales') && (
+                {transactionType === 'purchases' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Sub Type</label>
+                    <select
+                      value={filters.subType}
+                      onChange={(e) => setFilters({...filters, subType: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">All Sub Types</option>
+                      {getUniqueValues('subType').map(subType => (
+                        <option key={subType} value={subType}>{subType}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {(transactionType === 'exchanges' || transactionType === 'sales' || transactionType === 'purchases') && (
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Source</label>
                     <select
@@ -486,17 +533,22 @@ function DailyReports({ transactionType, onClose }) {
                   </div>
                 )}
 
-                {transactionType === 'sales' && (
+                {(transactionType === 'sales' || transactionType === 'purchases') && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Payment Mode</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      {transactionType === 'sales' ? 'Payment Mode' : 'Payment Type'}
+                    </label>
                     <select
                       value={filters.mode}
                       onChange={(e) => setFilters({...filters, mode: e.target.value})}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
-                      <option value="">All Modes</option>
-                      {getUniqueValues('mode').map(mode => (
+                      <option value="">All {transactionType === 'sales' ? 'Modes' : 'Types'}</option>
+                      {transactionType === 'sales' && getUniqueValues('mode').map(mode => (
                         <option key={mode} value={mode}>{mode}</option>
+                      ))}
+                      {transactionType === 'purchases' && getUniqueValues('paymentType').map(paymentType => (
+                        <option key={paymentType} value={paymentType}>{paymentType}</option>
                       ))}
                     </select>
                   </div>
@@ -516,6 +568,39 @@ function DailyReports({ transactionType, onClose }) {
                    <p className="text-sm text-gray-600">
                      Date: {new Date(selectedDate).toLocaleDateString('en-GB')}
                    </p>
+                   {/* Active Filters Summary */}
+                   {Object.values(filters).some(filter => filter !== '') && (
+                     <div className="mt-2">
+                       <p className="text-xs text-gray-500">Active Filters:</p>
+                       <div className="flex flex-wrap gap-1 mt-1">
+                         {filters.employee && (
+                           <span className="inline-block px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                             Employee: {filters.employee}
+                           </span>
+                         )}
+                         {filters.type && (
+                           <span className="inline-block px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                             Type: {filters.type}
+                           </span>
+                         )}
+                         {filters.subType && (
+                           <span className="inline-block px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded-full">
+                             Sub Type: {filters.subType}
+                           </span>
+                         )}
+                         {filters.source && (
+                           <span className="inline-block px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+                             Source: {filters.source}
+                           </span>
+                         )}
+                         {filters.mode && (
+                           <span className="inline-block px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">
+                             {transactionType === 'sales' ? 'Mode' : 'Payment Type'}: {filters.mode}
+                           </span>
+                         )}
+                       </div>
+                     </div>
+                   )}
                  </div>
                  <div className="text-right">
                    <p className="text-sm text-gray-600">Store</p>
