@@ -34,7 +34,7 @@ function Sales() {
   useEffect(() => {
     const weight = parseFloat(form.weight) || 0;
     const rate = parseFloat(form.rate) || 0;
-    setAmount(weight && rate ? (weight * rate).toFixed(0) : '');
+    setAmount(weight && rate ? ((weight * rate) / 10).toFixed(0) : '');
   }, [form.weight, form.rate]);
 
   const handleChange = (e) => {
@@ -187,7 +187,7 @@ function Sales() {
 
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-gray-800 mb-2">
-                    Rate (₹/gram)
+                    Rate (₹/10 grams)
                   </label>
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -203,7 +203,7 @@ function Sales() {
                       type="number" 
                       min="0" 
                       className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-green-100 focus:border-green-500 text-base transition-all duration-200 bg-gray-50 focus:bg-white" 
-                      placeholder="Enter rate" 
+                      placeholder="Enter rate for 10 grams" 
                       style={{ WebkitAppearance: 'none', MozAppearance: 'textfield' }}
                     />
                   </div>
@@ -214,10 +214,10 @@ function Sales() {
               <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-4 border border-green-200">
                 <h3 className="text-sm font-semibold text-gray-800 mb-2">Amount Calculation</h3>
                 <div className="text-center">
-                  <div className="text-xs text-gray-600 mb-1">Weight × Rate =</div>
+                  <div className="text-xs text-gray-600 mb-1">(Weight × Rate) ÷ 10 =</div>
                   <div className="bg-white rounded-lg p-3 border border-green-200">
                     <span className="text-2xl font-bold text-green-600">₹{amount || '0'}</span>
-                    <div className="text-xs text-gray-500">(automatically calculated)</div>
+                    <div className="text-xs text-gray-500">(rate is per 10 grams)</div>
                   </div>
                 </div>
               </div>
